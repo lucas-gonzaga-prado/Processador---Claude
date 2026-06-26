@@ -5,6 +5,7 @@
 //
 //  - 32-bit counter, word-addressed
 //  - Updates on negedge clk (consistent with processor timing convention)
+//  - Asynchronous reset (rst) forces PC = 0 immediately
 //  - Starts at 0 on initialization
 //  - Locked if next PC >= 2^10 (1024) — exceeds ROM bounds
 //  - Locked if HLT is active
@@ -26,6 +27,7 @@
 
 module PC (
     input  wire        clk,
+    input  wire        rst,            // Asynchronous reset — PC = 0
     input  wire        HLT,            // Halt — freeze PC
     input  wire        Jump,           // JMP or JAL — PC = JumpAddr
     input  wire        JR,             // JR — PC = JRAddr
@@ -52,9 +54,11 @@ module PC (
         else             next_pc = PC_out + 1;
     end
 
-    // ── Sequential update — negedge ───────────────────────────────────────────
-    always @(negedge clk) begin
-        if (HLT || next_pc > MAX_PC)
+    // ── Sequential update — negedge, async reset ──────────────────────────────
+    always @(negedge clk or posedge rst) begin
+        if (rst)
+            PC_out <= 32'b0;           // async reset, independent of clock
+        else if (HLT || next_pc > MAX_PC)
             PC_out <= PC_out;          // freeze
         else
             PC_out <= next_pc;

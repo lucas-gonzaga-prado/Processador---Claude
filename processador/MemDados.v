@@ -4,14 +4,14 @@
 //  MemDados — Data Memory (RAM)
 //
 //  - 1024 x 32-bit words (adjustable via ADDR_WIDTH)
-//  - Synchronous write : commits on posedge write_clk (STORE, PUSH)
-//  - Synchronous read  : data available on negedge read_clk (LOAD, POP)
-//  - Two clock inputs  : write_clk and read_clk — connect both to the same
-//                        processor clock to maintain monocycle behavior.
+//  - Synchronous write  : commits on posedge write_clk (STORE, PUSH)
+//  - Asynchronous read  : data available combinationally (LOAD, POP)
+//  - read_clk is kept in the port list for compatibility but is unused.
 //
 //  Timing (consistent with processor convention):
 //    posedge write_clk : RAM write commits   (STORE, PUSH)
-//    negedge read_clk  : RAM read available  (LOAD, POP)
+//    async read        : data_out tracks ram[read_addr] continuously, so the
+//                        negedge register write captures the correct word.
 // =============================================================================
 
 module MemDados
@@ -21,12 +21,12 @@ module MemDados
 )
 (
     input  wire                    write_clk,   // Write clock (posedge = STORE/PUSH commits)
-    input  wire                    read_clk,    // Read clock  (negedge = LOAD/POP available)
+    input  wire                    read_clk,    // Read clock  (unused — read is async)
     input  wire                    MemWrite,    // Write enable (STORE, PUSH)
     input  wire [(ADDR_WIDTH-1):0] write_addr,  // Write address
     input  wire [(ADDR_WIDTH-1):0] read_addr,   // Read address
     input  wire [(DATA_WIDTH-1):0] data_in,     // Data to write
-    output reg  [(DATA_WIDTH-1):0] data_out     // Data read
+    output wire [(DATA_WIDTH-1):0] data_out     // Data read
 );
 
     // ── RAM array ─────────────────────────────────────────────────────────────
@@ -46,11 +46,11 @@ module MemDados
             ram[write_addr] <= data_in;
     end
 
-    // ── Synchronous read — negedge ────────────────────────────────────────────
-    // LOAD and POP: data available at the end of the instruction cycle,
-    // after the write has already committed at posedge.
-    always @(negedge read_clk) begin
-        data_out <= ram[read_addr];
-    end
+    // ── Asynchronous read ─────────────────────────────────────────────────────
+    // LOAD and POP: data available combinationally, like the instruction ROM.
+    // Required so the register bank (which writes on negedge) captures the
+    // freshly addressed word in the SAME cycle — a registered read would lag
+    // by one cycle and write stale data.
+    assign data_out = ram[read_addr];
 
 endmodule

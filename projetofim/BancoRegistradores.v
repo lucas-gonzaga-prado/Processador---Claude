@@ -16,7 +16,7 @@
 
 module BancoRegistradores (
     input  wire        clk,
-    input  wire        rst,                  // Synchronous reset, active high
+    input  wire        rst,                  // Asynchronous reset, active high
 
     // ── Read ports ──────────────────────────────────────────────────────────
     input  wire [5:0]  Registrador1,         // RS address
@@ -54,9 +54,10 @@ module BancoRegistradores (
     // ── Synchronous write ────────────────────────────────────────────────────
     integer i;
 
-    always @(negedge clk) begin
+    always @(negedge clk or posedge rst) begin
         if (rst) begin
-            // Reset all registers to zero.
+            // Asynchronous reset — fires immediately on KEY[0], independent of
+            // the step-button clock (which idles high and only pulses on press).
             // RPI initial value is set by software; the register file has
             // no knowledge of the stack layout in data memory.
             for (i = 0; i < 64; i = i + 1)

@@ -22,7 +22,7 @@
 module MemInstrucao
 #(
     parameter DATA_WIDTH = 32,   // Instruction width (32 bits)
-    parameter ADDR_WIDTH = 10     // 2^10 = 1024 instruction slots
+    parameter ADDR_WIDTH = 8     // 2^8 = 256 instruction slots
 )
 (
     input  wire [(ADDR_WIDTH-1):0] addr,   // PC (word-addressed)

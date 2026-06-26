@@ -5,8 +5,12 @@
 //
 //  Pin mapping:
 //    CLOCK_50     → processor clock (50 MHz)
-//    KEY[0]       → reset (active low)
+//    KEY[0]       → reset (active low) — volta ao estado travado
 //    KEY[1]       → step button (avança o clock do processador manualmente)
+//
+//  Estado inicial: ao ligar/resetar, o processador fica travado (PC=0) e os
+//  displays mostram "0000". O 1º aperto de KEY[1] libera o sistema (continua 0000).
+//  A partir do 2º aperto, cada toque executa uma instrução (modo passo a passo).
 //    SW[17:0]     → Switches[17:0] input (IN instruction)
 //    LEDR[17:0]   → Display[17:0]  output (OUT instruction)
 //    LEDG[8:0]    → status LEDs
@@ -44,6 +48,9 @@ module projetofinal (
     wire        clk_lento;
     wire        clock_passo; // Sinal do botão para o processador
 
+    wire        proc_clk;    // Clock do processador — liberado só após o 1º aperto
+    reg         started;     // 0 = travado (display 0000), 1 = programa liberado
+
     // ── Control signals exposed from processor ─────────────────────────────────
     wire        HLT_sig;
     wire        MemWrite_sig;
@@ -73,12 +80,34 @@ module projetofinal (
         .BOTTON  (clock_passo)
     );
 
+    // ── Start gate: tela inicial "9999" até o primeiro aperto ──────────────────
+    // started sobe na BORDA DE SUBIDA do clock_passo (fim do 1º pulso do botão),
+    // quando o sinal já voltou a 1. Assim o aperto que "arma" NÃO gera um negedge
+    // no processador → ele não executa instrução nesse 1º toque, apenas libera.
+    // A partir daí, cada aperto = um negedge = um passo do programa.
+    initial started = 1'b0;
+    always @(posedge clock_passo or posedge rst) begin
+        if (rst) started <= 1'b0;   // KEY[0] volta para a tela inicial (9999)
+        else     started <= 1'b1;   // 1º aperto libera o programa
+    end
+
+    // Clock do processador: travado em 0 enquanto não iniciado (sem negedge → PC=0).
+    // Quando libera, started muda com clock_passo em nível ALTO → a saída do AND faz
+    // só uma transição 0→1 (borda de subida, inofensiva para a lógica em negedge).
+    assign proc_clk = started & clock_passo;
+
     // ── Processor instantiation ────────────────────────────────────────────────
     Processador proc (
-        .clk      (clock_passo), // O processador agora "pula" no pulso do botão
-        .rst      (rst),
-        .Switches (Switches),
-        .Display  (Display)
+        .clk             (proc_clk),    // só "pula" depois de armado, no pulso do botão
+        .rst             (rst),
+        .Switches        (Switches),
+        .Display         (Display),
+
+        // Status signals → LEDs verdes
+        .dbg_MemWrite    (MemWrite_sig),
+        .dbg_MemRead     (MemRead_sig),
+        .dbg_HLT         (HLT_sig),
+        .dbg_BranchTaken (BranchTaken_sig)
     );
 
     // ── LEDs ───────────────────────────────────────────────────────────────────
@@ -86,13 +115,14 @@ module projetofinal (
     assign LEDR[17:0] = Display[17:0];
 
     // Green LEDs: processor status
-    assign LEDG[0] = ~HLT_sig;        // ON = running, OFF = halted
+    assign LEDG[0] = started & ~HLT_sig; // ON = rodando, OFF = aguardando ou halt
     assign LEDG[1] = MemWrite_sig;     // ON = writing to memory
     assign LEDG[2] = MemRead_sig;      // ON = reading from memory
     assign LEDG[3] = BranchTaken_sig;  // ON = branch taken
     assign LEDG[8:4] = 5'b0;          // unused
 
     // ── Seven-segment displays: show Display[31:0] as 8 hex digits ─────────────
+    // Enquanto travado (started=0) o processador fica em PC=0 e Display=0 → "0000".
     hex_decoder h0 (.val(Display[3:0]),   .seg(HEX0));
     hex_decoder h1 (.val(Display[7:4]),   .seg(HEX1));
     hex_decoder h2 (.val(Display[11:8]),  .seg(HEX2));

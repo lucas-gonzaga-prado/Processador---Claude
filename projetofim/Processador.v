@@ -64,7 +64,10 @@ module Processador (
 
     output wire        dbg_RegWrite,
     output wire        dbg_MemRead,
-    output wire        dbg_MemWrite
+    output wire        dbg_MemWrite,
+
+    output wire        dbg_HLT,
+    output wire        dbg_BranchTaken
 );
 
     // =========================================================================
@@ -127,6 +130,8 @@ module Processador (
     wire [5:0] Registrador2 =
         (MemWrite | Push)   ? RD_field :   // STORE/PUSH: read RD (data to write)
         (opcode == MOV_OP)  ? RS_field :   // MOV: B=RS (A=RZ, result=RS)
+        Branch              ? RD_field :   // Branch (Type I has no RT field —
+                                            // comparison is RS vs RD, per ISA encoding)
         RT_field;                           // default: RT
 
     // =========================================================================
@@ -187,9 +192,10 @@ module Processador (
     wire [31:0] mem_data_in = Dado2;
 
     // =========================================================================
-    //  RAL: save current PC before JAL jump
+    //  RAL: save return address (next instruction) before JAL jump
+    //    Must be PC+1 — saving PC_out would return to the JAL itself (loop).
     // =========================================================================
-    wire [31:0] RAL_in = PC_out;
+    wire [31:0] RAL_in = PC_out + 32'd1;
 
     // =========================================================================
     //  Display output (OUT instruction)
@@ -203,6 +209,7 @@ module Processador (
     // ── Program Counter ───────────────────────────────────────────────────────
     PC pc (
         .clk          (clk),
+        .rst          (rst),
         .HLT          (HLT),
         .Jump         (Jump),
         .JR           (JR),
@@ -313,5 +320,8 @@ module Processador (
     assign dbg_RegWrite    = RegWrite;
     assign dbg_MemRead     = MemRead;
     assign dbg_MemWrite    = MemWrite;
+
+    assign dbg_HLT         = HLT;
+    assign dbg_BranchTaken = BranchTaken;
 
 endmodule

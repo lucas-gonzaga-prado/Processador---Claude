@@ -188,9 +188,10 @@ module Processador (
     wire [31:0] mem_data_in = Dado2;
 
     // =========================================================================
-    //  RAL: save current PC before JAL jump
+    //  RAL: save return address (next instruction) before JAL jump
+    //    Must be PC+1 — saving PC_out would return to the JAL itself (loop).
     // =========================================================================
-    wire [31:0] RAL_in = PC_out;
+    wire [31:0] RAL_in = PC_out + 32'd1;
 
     // =========================================================================
     //  Display output (OUT instruction)
