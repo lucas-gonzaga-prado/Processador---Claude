@@ -40,6 +40,7 @@
 
 module Processador (
     input  wire        clk,
+    input  wire        en,    // clock-enable: 1 habilita um passo, 0 congela o estado
     input  wire        rst,
 
     input  wire [31:0] Switches,
@@ -172,19 +173,19 @@ module Processador (
     //   PUSH   → RPI+1 (pre-increment)
     //   STORER → RS directly (bypass ULA — see note in header)
     //   STORED / STOREI → ResultULA (RS+END14 or END20)
-    wire [9:0] mem_write_addr =
-        Push                    ? RPI_new[9:0] :
-        (opcode == STORER_OP)   ? Dado1[9:0]   :
-        ResultULA[9:0];
+    wire [5:0] mem_write_addr =
+        Push                    ? RPI_new[5:0] :
+        (opcode == STORER_OP)   ? Dado1[5:0]   :
+        ResultULA[5:0];
 
     // Read address:
     //   POP    → current RPI (Dado1 = R63)
     //   LOADR  → RS directly (bypass ULA)
     //   LOADD / LOADI → ResultULA (RS+END14 or END20)
-    wire [9:0] mem_read_addr =
-        Pop                     ? RPI_val[9:0] :
-        (opcode == LOADR_OP)    ? Dado1[9:0]   :
-        ResultULA[9:0];
+    wire [5:0] mem_read_addr =
+        Pop                     ? RPI_val[5:0] :
+        (opcode == LOADR_OP)    ? Dado1[5:0]   :
+        ResultULA[5:0];
 
     // Write data: always Dado2
     //   STORE: Dado2 = RD value (muxed above)
@@ -210,6 +211,7 @@ module Processador (
     PC pc (
         .clk          (clk),
         .rst          (rst),
+        .en           (en),
         .HLT          (HLT),
         .Jump         (Jump),
         .JR           (JR),
@@ -222,7 +224,7 @@ module Processador (
 
     // ── Instruction Memory (ROM) ──────────────────────────────────────────────
     MemInstrucao rom (
-        .addr (PC_out[9:0]),
+        .addr (PC_out[6:0]),
         .q    (instruction)
     );
 
@@ -277,14 +279,14 @@ module Processador (
         .Registrador2       (Registrador2),
         .Dado1              (Dado1),
         .Dado2              (Dado2),
-        .RegWrite           (RegWrite),
+        .RegWrite           (RegWrite & en),
         .RegistradorEscrita (RD_field),
         .DadoParaEscrita    (DadoParaEscrita),
-        .RHWrite            (RHWrite),
+        .RHWrite            (RHWrite  & en),
         .RH                 (ResultULA_High),
-        .RPIWrite           (RPIWrite),
+        .RPIWrite           (RPIWrite & en),
         .RPI                (RPI_new),
-        .RALWrite           (RALWrite),
+        .RALWrite           (RALWrite & en),
         .RAL                (RAL_in)
     );
 
@@ -292,7 +294,7 @@ module Processador (
     MemDados ram (
         .write_clk  (clk),
         .read_clk   (clk),
-        .MemWrite   (MemWrite),
+        .MemWrite   (MemWrite & en),
         .write_addr (mem_write_addr),
         .read_addr  (mem_read_addr),
         .data_in    (mem_data_in),

@@ -48,7 +48,6 @@ module projetofinal (
     wire        clk_lento;
     wire        clock_passo; // Sinal do botão para o processador
 
-    wire        proc_clk;    // Clock do processador — liberado só após o 1º aperto
     reg         started;     // 0 = travado (display 0000), 1 = programa liberado
 
     // ── Control signals exposed from processor ─────────────────────────────────
@@ -91,14 +90,16 @@ module projetofinal (
         else     started <= 1'b1;   // 1º aperto libera o programa
     end
 
-    // Clock do processador: travado em 0 enquanto não iniciado (sem negedge → PC=0).
-    // Quando libera, started muda com clock_passo em nível ALTO → a saída do AND faz
-    // só uma transição 0→1 (borda de subida, inofensiva para a lógica em negedge).
-    assign proc_clk = started & clock_passo;
-
     // ── Processor instantiation ────────────────────────────────────────────────
+    // Clock LIMPO: o processador é SEMPRE clocado por clock_passo (sem gated clock).
+    // 'started' entra como CLOCK-ENABLE (en): enquanto 0, o PC e todas as escritas
+    // ficam congelados (PC=0, Display=0000); o 1º aperto apenas arma (started↑ ocorre
+    // na borda de subida, então o negedge desse 1º toque vê en=0 e não executa).
+    // Isso substitui o antigo "started & clock_passo", que era um clock combinacional
+    // e disparava o tempo de compilação no Quartus (gated clock → fit de horas).
     Processador proc (
-        .clk             (proc_clk),    // só "pula" depois de armado, no pulso do botão
+        .clk             (clock_passo), // clock limpo (saída registrada do botão)
+        .en              (started),     // habilita a execução só após o 1º aperto
         .rst             (rst),
         .Switches        (Switches),
         .Display         (Display),

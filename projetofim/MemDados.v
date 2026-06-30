@@ -3,7 +3,7 @@
 // =============================================================================
 //  MemDados — Data Memory (RAM)
 //
-//  - 1024 x 32-bit words (adjustable via ADDR_WIDTH)
+//  - 64 x 32-bit words (adjustable via ADDR_WIDTH)
 //  - Synchronous write  : commits on negedge write_clk (STORE, PUSH)
 //  - Asynchronous read  : data available combinationally (LOAD, POP)
 //  - read_clk is kept in the port list for compatibility but is unused.
@@ -20,7 +20,7 @@
 module MemDados
 #(
     parameter DATA_WIDTH = 32,   // Word size (32 bits)
-    parameter ADDR_WIDTH = 8    // 2^8 = 256 memory slots
+    parameter ADDR_WIDTH = 6    // 2^6 = 64 memory slots
 )
 (
     input  wire                    write_clk,   // Write clock (negedge = STORE/PUSH commits)

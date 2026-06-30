@@ -7,7 +7,7 @@
 //  - Updates on negedge clk (consistent with processor timing convention)
 //  - Asynchronous reset (rst) forces PC = 0 immediately
 //  - Starts at 0 on initialization
-//  - Locked if next PC >= 2^10 (1024) — exceeds ROM bounds
+//  - Locked if next PC >= 2^7 (128) — exceeds ROM bounds
 //  - Locked if HLT is active
 //
 //  Priority (highest to lowest):
@@ -28,6 +28,7 @@
 module PC (
     input  wire        clk,
     input  wire        rst,            // Asynchronous reset — PC = 0
+    input  wire        en,             // Clock-enable — 0 congela o PC (estado inicial)
     input  wire        HLT,            // Halt — freeze PC
     input  wire        Jump,           // JMP or JAL — PC = JumpAddr
     input  wire        JR,             // JR — PC = JRAddr
@@ -38,8 +39,8 @@ module PC (
     output reg  [31:0] PC_out          // Current PC (connects to ROM addr)
 );
 
-    // ROM upper bound — matches MemInstrucao ADDR_WIDTH = 10
-    localparam MAX_PC = 32'd1023;      // 2^10 - 1
+    // ROM upper bound — matches MemInstrucao ADDR_WIDTH = 7
+    localparam MAX_PC = 32'd127;       // 2^7 - 1 (ROM = 128 instruções)
 
     // ── Initialization ────────────────────────────────────────────────────────
     initial PC_out = 32'b0;
@@ -58,8 +59,8 @@ module PC (
     always @(negedge clk or posedge rst) begin
         if (rst)
             PC_out <= 32'b0;           // async reset, independent of clock
-        else if (HLT || next_pc > MAX_PC)
-            PC_out <= PC_out;          // freeze
+        else if (!en || HLT || next_pc > MAX_PC)
+            PC_out <= PC_out;          // congelado: aguardando 1º aperto, HLT ou fim da ROM
         else
             PC_out <= next_pc;
     end

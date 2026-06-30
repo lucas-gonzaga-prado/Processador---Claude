@@ -3,7 +3,7 @@
 // =============================================================================
 //  MemInstrucao — Instruction Memory (ROM)
 //
-//  - 256 x 32-bit words (adjustable via ADDR_WIDTH)
+//  - 128 x 32-bit words (adjustable via ADDR_WIDTH)
 //  - Asynchronous read: instruction available immediately when PC changes
 //  - Initialized from external file via $readmemb
 //  - No write port: ROM is read-only during execution
@@ -22,7 +22,7 @@
 module MemInstrucao
 #(
     parameter DATA_WIDTH = 32,   // Instruction width (32 bits)
-    parameter ADDR_WIDTH = 8     // 2^8 = 256 instruction slots
+    parameter ADDR_WIDTH = 7     // 2^7 = 128 instruction slots
 )
 (
     input  wire [(ADDR_WIDTH-1):0] addr,   // PC (word-addressed)
