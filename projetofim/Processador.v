@@ -44,7 +44,7 @@ module Processador (
     input  wire        rst,
 
     input  wire [31:0] Switches,
-    output reg  [31:0] Display,
+    output wire [31:0] Display,
 
     // =============================
     // DEBUG - sinais para waveform
@@ -199,17 +199,21 @@ module Processador (
     wire [31:0] RAL_in = PC_out + 32'd1;
 
     // =========================================================================
-    //  Display output (OUT instruction) — TRAVADO (latch)
-    //  Atualiza no OUT e SEGURA o valor ate o proximo OUT. Assim o display nao
-    //  pisca entre instrucoes e NAO apaga no HLT (o ultimo valor fica fixo).
+    //  Display output (OUT) — mostra no instante do OUT e SEGURA depois
+    //  - Durante um OUT: mostra Dado1 (imediato) -> aparece exatamente na
+    //    instrucao OUT que esta executando.
+    //  - Fora do OUT (e no HLT): segura o ultimo valor mostrado (disp_hold),
+    //    entao nao pisca entre instrucoes e nao apaga ao parar.
     //  rst limpa para 0.
     // =========================================================================
+    reg [31:0] disp_hold;
     always @(negedge clk or posedge rst) begin
         if (rst)
-            Display <= 32'b0;
+            disp_hold <= 32'b0;
         else if (en && PortaON)
-            Display <= Dado1;
+            disp_hold <= Dado1;      // guarda o valor do OUT atual
     end
+    assign Display = (en && PortaON) ? Dado1 : disp_hold;
 
     // =========================================================================
     //  Module instantiations
