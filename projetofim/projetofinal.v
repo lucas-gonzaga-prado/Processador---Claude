@@ -5,12 +5,13 @@
 //
 //  Pin mapping:
 //    CLOCK_50     → processor clock (50 MHz)
-//    KEY[0]       → reset (active low) — volta ao estado travado
-//    KEY[1]       → step button (avança o clock do processador manualmente)
+//    KEY[0]       → reset (active low) — volta ao estado inicial (PC=0, display 0000)
+//    KEY[1]       → start (1 aperto inicia; depois roda sozinho no clk_lento)
 //
-//  Estado inicial: ao ligar/resetar, o processador fica travado (PC=0) e os
-//  displays mostram "0000". O 1º aperto de KEY[1] libera o sistema (continua 0000).
-//  A partir do 2º aperto, cada toque executa uma instrução (modo passo a passo).
+//  Estado inicial: ao ligar/resetar, o processador fica congelado (PC=0) e o
+//  display mostra "0000". Basta 1 aperto de KEY[1] para iniciar; a partir dai o
+//  programa roda automaticamente (~10 Hz) ate o HLT. O display TRAVA no ultimo
+//  valor mostrado (nao apaga no HLT). KEY[0] reinicia tudo.
 //    SW[17:0]     → Switches[17:0] input (IN instruction)
 //    LEDR[17:0]   → Display[17:0]  output (OUT instruction)
 //    LEDG[8:0]    → status LEDs
@@ -79,27 +80,25 @@ module projetofinal (
         .BOTTON  (clock_passo)
     );
 
-    // ── Start gate: tela inicial "9999" até o primeiro aperto ──────────────────
-    // started sobe na BORDA DE SUBIDA do clock_passo (fim do 1º pulso do botão),
-    // quando o sinal já voltou a 1. Assim o aperto que "arma" NÃO gera um negedge
-    // no processador → ele não executa instrução nesse 1º toque, apenas libera.
-    // A partir daí, cada aperto = um negedge = um passo do programa.
+    // ── Start gate: 1 aperto inicia; depois roda SOZINHO ───────────────────────
+    // 'started' sobe no 1º aperto do KEY[1] (borda de subida do clock_passo).
+    // Depois disso o processador roda automaticamente no clock livre clk_lento
+    // (~10 Hz) — nao precisa apertar a cada instrucao.
+    // KEY[0] (reset) volta 'started' a 0 (tela inicial 0000) para rodar de novo.
     initial started = 1'b0;
     always @(posedge clock_passo or posedge rst) begin
-        if (rst) started <= 1'b0;   // KEY[0] volta para a tela inicial (9999)
-        else     started <= 1'b1;   // 1º aperto libera o programa
+        if (rst) started <= 1'b0;   // KEY[0] reinicia (tela inicial 0000)
+        else     started <= 1'b1;   // 1º aperto libera a execucao automatica
     end
 
     // ── Processor instantiation ────────────────────────────────────────────────
-    // Clock LIMPO: o processador é SEMPRE clocado por clock_passo (sem gated clock).
-    // 'started' entra como CLOCK-ENABLE (en): enquanto 0, o PC e todas as escritas
-    // ficam congelados (PC=0, Display=0000); o 1º aperto apenas arma (started↑ ocorre
-    // na borda de subida, então o negedge desse 1º toque vê en=0 e não executa).
-    // Isso substitui o antigo "started & clock_passo", que era um clock combinacional
-    // e disparava o tempo de compilação no Quartus (gated clock → fit de horas).
+    // Clock LIVRE: o processador roda no clk_lento (clock limpo do divisor, ja em
+    // rede global). 'started' entra como CLOCK-ENABLE (en): enquanto 0 o PC e as
+    // escritas ficam congelados (PC=0). O 1º aperto do KEY[1] arma (started=1) e a
+    // partir dai o clk_lento avanca uma instrucao por borda automaticamente ate o HLT.
     Processador proc (
-        .clk             (clock_passo), // clock limpo (saída registrada do botão)
-        .en              (started),     // habilita a execução só após o 1º aperto
+        .clk             (clk_lento),   // clock livre ~10 Hz (roda sozinho)
+        .en              (started),     // 1º aperto arma; depois roda automatico
         .rst             (rst),
         .Switches        (Switches),
         .Display         (Display),

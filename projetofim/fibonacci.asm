@@ -3,13 +3,16 @@
 ;
 ;  Monta com:   perl asm.pl fibonacci.asm instrucoes.txt
 ;
-;  Mostra no display, a cada passo: 0, 1, 1, 2, 3  (contador = 5 termos).
-;  Aumente o imediato do MOVI R1 para exibir mais termos (ex.: 7 -> ...5, 8).
+;  QUANTIDADE DE TERMOS vem das chaves SW (em binario): ajuste as chaves para o
+;  numero desejado, aperte KEY[1] para rodar e KEY[0] para resetar.
+;  Ex.: SW = 001001 (9) -> mostra 0,1,1,2,3,5,8,13,21 (display em hex: ...8, d, 15).
+;  O valor final fica TRAVADO no display ao chegar no HLT.
+;  (SW = 0 -> 0 termos; display fica em 0.)
 ;
 ;  Registradores:  R1 = contador   R3 = a (atual)   R4 = b (proximo)   R5 = temporario
 ; =============================================================================
 
-        MOVI R1, 5          ; contador = 5 termos
+        IN   R1             ; contador = valor das chaves SW (binario)
         MOVI R3, 0          ; a = 0
         MOVI R4, 1          ; b = 1
 
