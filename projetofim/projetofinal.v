@@ -19,9 +19,8 @@
 //                   LEDG[1] = MemWrite active
 //                   LEDG[2] = MemRead active
 //                   LEDG[3] = Branch taken
-//    HEX0-HEX7   → Display[31:0] shown as 8 hex digits
-//                   HEX7 HEX6 HEX5 HEX4 | HEX3 HEX2 HEX1 HEX0
-//                   [31:28][27:24][23:20][19:16] [15:12][11:8][7:4][3:0]
+//    HEX0-HEX7   → Display em DECIMAL (via bin2bcd): HEX0=unidades, HEX1=dezenas,
+//                   HEX2=centenas, ... (valores >= 10^8 mostram os 8 dígitos baixos)
 // =============================================================================
 
 module projetofinal (
@@ -121,17 +120,49 @@ module projetofinal (
     assign LEDG[3] = BranchTaken_sig;  // ON = branch taken
     assign LEDG[8:4] = 5'b0;          // unused
 
-    // ── Seven-segment displays: show Display[31:0] as 8 hex digits ─────────────
-    // Enquanto travado (started=0) o processador fica em PC=0 e Display=0 → "0000".
-    hex_decoder h0 (.val(Display[3:0]),   .seg(HEX0));
-    hex_decoder h1 (.val(Display[7:4]),   .seg(HEX1));
-    hex_decoder h2 (.val(Display[11:8]),  .seg(HEX2));
-    hex_decoder h3 (.val(Display[15:12]), .seg(HEX3));
-    hex_decoder h4 (.val(Display[19:16]), .seg(HEX4));
-    hex_decoder h5 (.val(Display[23:20]), .seg(HEX5));
-    hex_decoder h6 (.val(Display[27:24]), .seg(HEX6));
-    hex_decoder h7 (.val(Display[31:28]), .seg(HEX7));
+    // ── Seven-segment displays: mostra Display em DECIMAL (8 dígitos) ───────────
+    // Converte o valor binário para BCD (double dabble) e manda cada dígito
+    // decimal (0..9) para um display. Valores >= 10^8 mostram os 8 dígitos baixos.
+    wire [31:0] bcd;
+    bin2bcd conv (.bin(Display), .bcd(bcd));
 
+    hex_decoder h0 (.val(bcd[3:0]),   .seg(HEX0));   // unidades
+    hex_decoder h1 (.val(bcd[7:4]),   .seg(HEX1));   // dezenas
+    hex_decoder h2 (.val(bcd[11:8]),  .seg(HEX2));   // centenas
+    hex_decoder h3 (.val(bcd[15:12]), .seg(HEX3));
+    hex_decoder h4 (.val(bcd[19:16]), .seg(HEX4));
+    hex_decoder h5 (.val(bcd[23:20]), .seg(HEX5));
+    hex_decoder h6 (.val(bcd[27:24]), .seg(HEX6));
+    hex_decoder h7 (.val(bcd[31:28]), .seg(HEX7));
+
+endmodule
+
+
+// =============================================================================
+//  bin2bcd — conversor binário -> BCD (algoritmo "double dabble", combinacional)
+//
+//  Entrada: 32 bits binário.  Saída: 8 dígitos BCD (4 bits cada = 0..9).
+//  Cada dígito vai para um display de 7 segmentos, mostrando o número em DECIMAL.
+//  Observação: só há 8 displays, então valores >= 100.000.000 mostram apenas os
+//  8 dígitos decimais mais baixos (o resto do range de 32 bits não cabe).
+// =============================================================================
+
+module bin2bcd (
+    input  wire [31:0] bin,
+    output reg  [31:0] bcd    // 8 dígitos: bcd[3:0]=unidades, [7:4]=dezenas, ...
+);
+    integer i, j;
+    always @(*) begin
+        bcd = 32'd0;
+        for (i = 31; i >= 0; i = i - 1) begin
+            // antes de deslocar, soma 3 a cada dígito BCD que for >= 5
+            for (j = 0; j < 8; j = j + 1)
+                if (bcd[j*4 +: 4] >= 5)
+                    bcd[j*4 +: 4] = bcd[j*4 +: 4] + 4'd3;
+            // desloca 1 bit para a esquerda, trazendo o próximo bit do binário
+            bcd = {bcd[30:0], bin[i]};
+        end
+    end
 endmodule
 
 
