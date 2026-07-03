@@ -64,9 +64,9 @@ module projetofinal (
 
     // ── Geração de Clock Lento e Debounce do Botão ─────────────────────────────
     
-    // Instancia o divisor de frequência: 50MHz / (2*DIVISOR) = 1 Hz
+    // Instancia o divisor de frequência: 50MHz / (2*DIVISOR) = 0,5 Hz
     DivisorFreq #(
-        .DIVISOR(25000000) // 1 Hz: uma instrução por segundo (para acompanhar)
+        .DIVISOR(50000000) // 0,5 Hz: uma instrução a cada 2 segundos (para acompanhar)
     ) div_clock (
         .clk_in  (CLOCK_50),
         .clk_out (clk_lento)
