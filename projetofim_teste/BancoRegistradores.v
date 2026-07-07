@@ -3,83 +3,69 @@
 // =============================================================================
 //  BancoRegistradores — 64 x 32-bit register file
 //
-//  Special register map (fixed addresses):
-//    R0  (6'd0)  — RZ  : constant zero (writes ignored, reads always 0)
-//    R60 (6'd60) — RL  : MUL low word / DIV quotient
-//    R61 (6'd61) — RH  : MUL high word / DIV remainder
-//    R62 (6'd62) — RAL : return address link (saved by JAL)
-//    R63 (6'd63) — RPI : stack pointer (top of stack in data memory)
+//  Special registers (fixed addresses):
+//    R0  — RZ  : constant zero (writes ignored, reads always 0)
+//    R61 — RH  : MUL high word / DIV remainder
+//    R62 — RAL : return-address link (saved by JAL)
+//    R63 — RPI : stack pointer (top of stack in data memory)
 //
-//  Read ports  : combinational (asynchronous)
-//  Write ports : synchronous (rising edge)
+//  Read ports  : combinational (asynchronous).
+//  Write ports : synchronous on negedge clk; asynchronous reset (active high).
+//    Four write paths (last wins on the same address): normal RegWrite (RD),
+//    plus dedicated RHWrite (R61), RALWrite (R62) and RPIWrite (R63).
 // =============================================================================
 
 module BancoRegistradores (
     input  wire        clk,
-    input  wire        rst,                  // Asynchronous reset, active high
+    input  wire        rst,                 // asynchronous reset (active high)
 
-    // ── Read ports ──────────────────────────────────────────────────────────
-    input  wire [5:0]  Registrador1,         // RS address
-    input  wire [5:0]  Registrador2,         // RT address
+    // ── Read ports ────────────────────────────────────────────────────────────
+    input  wire [5:0]  ReadReg1,            // register number for port 1
+    input  wire [5:0]  ReadReg2,            // register number for port 2
+    output wire [31:0] ReadData1,           // data read from ReadReg1
+    output wire [31:0] ReadData2,           // data read from ReadReg2
 
-    output wire [31:0] Dado1,                // RS data out
-    output wire [31:0] Dado2,                // RT data out
+    // ── Normal write port ──────────────────────────────────────────────────────
+    input  wire        RegWrite,            // write enable
+    input  wire [5:0]  WriteReg,            // destination register (RD field)
+    input  wire [31:0] WriteData,           // data to write (from ALU or memory)
 
-    // ── Normal write port ────────────────────────────────────────────────────
-    input  wire        RegWrite,             // Write enable
-    input  wire [5:0]  RegistradorEscrita,   // Destination address (RD field)
-    input  wire [31:0] DadoParaEscrita,      // Write data (from ALU or memory)
-
-    // ── Dedicated write: RH (R61) — MUL high / DIV remainder ────────────────
+    // ── Dedicated write: RH (R61) — MUL high / DIV remainder ───────────────────
     input  wire        RHWrite,
-    input  wire [31:0] RH,                   // Result_High from ALU
+    input  wire [31:0] RH,
 
-    // ── Dedicated write: RPI (R63) — stack pointer ───────────────────────────
+    // ── Dedicated write: RPI (R63) — stack pointer ─────────────────────────────
     input  wire        RPIWrite,
-    input  wire [31:0] RPI,                  // Updated stack pointer
+    input  wire [31:0] RPI,
 
-    // ── Dedicated write: RAL (R62) — return address link ────────────────────
+    // ── Dedicated write: RAL (R62) — return-address link ───────────────────────
     input  wire        RALWrite,
-    input  wire [31:0] RAL                   // Return address (saved by JAL)
+    input  wire [31:0] RAL
 );
 
-    // ── Register array ───────────────────────────────────────────────────────
     reg [31:0] regs [0:63];
 
-    // ── Combinational read ───────────────────────────────────────────────────
-    // RZ (R0) always reads as zero; all others return their stored value.
-    assign Dado1 = (Registrador1 == 6'd0) ? 32'b0 : regs[Registrador1];
-    assign Dado2 = (Registrador2 == 6'd0) ? 32'b0 : regs[Registrador2];
+    // ── Combinational read (RZ / R0 always reads as 0) ─────────────────────────
+    assign ReadData1 = (ReadReg1 == 6'd0) ? 32'b0 : regs[ReadReg1];
+    assign ReadData2 = (ReadReg2 == 6'd0) ? 32'b0 : regs[ReadReg2];
 
-    // ── Synchronous write ────────────────────────────────────────────────────
+    // ── Synchronous write / asynchronous reset ─────────────────────────────────
     integer i;
-
     always @(negedge clk or posedge rst) begin
         if (rst) begin
-            // Asynchronous reset — fires immediately on KEY[0], independent of
-            // the step-button clock (which idles high and only pulses on press).
-            // RPI initial value is set by software; the register file has
-            // no knowledge of the stack layout in data memory.
+            // Async reset fires immediately on KEY[0], independent of the clock.
             for (i = 0; i < 64; i = i + 1)
                 regs[i] <= 32'b0;
         end else begin
+            // 1. Normal write (blocked for RZ / R0).
+            if (RegWrite && (WriteReg != 6'd0))
+                regs[WriteReg] <= WriteData;
 
-            // 1. Normal write (RegWrite) — blocked for RZ (R0)
-            if (RegWrite && (RegistradorEscrita != 6'd0))
-                regs[RegistradorEscrita] <= DadoParaEscrita;
-
-            // 2. RH (R61) — overwrites any simultaneous RegWrite to R61
-            if (RHWrite)
-                regs[6'd61] <= RH;
-
-            // 3. RAL (R62) — overwrites any simultaneous RegWrite to R62
-            if (RALWrite)
-                regs[6'd62] <= RAL;
-
-            // 4. RPI (R63) — overwrites any simultaneous RegWrite to R63
-            if (RPIWrite)
-                regs[6'd63] <= RPI;
-
+            // 2..4. Dedicated writes override a simultaneous RegWrite to R61/R62/R63.
+            if (RHWrite)  regs[6'd61] <= RH;
+            if (RALWrite) regs[6'd62] <= RAL;
+            if (RPIWrite) regs[6'd63] <= RPI;
         end
     end
+
 endmodule

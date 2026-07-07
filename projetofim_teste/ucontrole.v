@@ -1,29 +1,29 @@
 `timescale 1ns / 1ps
 
 // =============================================================================
-//  UnidadeControle — Control Unit
-//  Decodes 6-bit opcode and generates all control signals
+//  ucontrole — Control Unit
+//  Decodes the 6-bit opcode and generates every control signal (combinational).
 //
 //  Signal summary:
-//    RegWrite    : enable write to general register (RD)
-//    RHWrite     : enable write to RH (R61) — MUL/DIV high result
+//    RegWrite    : enable write to a general register (RD)
+//    RHWrite     : enable write to RH (R61) — MUL high word / DIV remainder
 //    RPIWrite    : enable write to RPI (R63) — stack pointer update
 //    RALWrite    : enable write to RAL (R62) — return address (JAL)
-//    ULASource   : 0 = RT register,  1 = Immediate
+//    ULASource   : 0 = RT register,  1 = immediate
 //    ULAControl  : ALU operation (4 bits)
-//    MemRead     : enable data memory read
-//    MemWrite    : enable data memory write
-//    MemToReg    : 0 = ALU result,   1 = Data memory output
-//    Branch      : branch instruction — PC update conditional
+//    MemRead     : enable data-memory read
+//    MemWrite    : enable data-memory write
+//    MemToReg    : 0 = ALU result,   1 = data-memory output
+//    Branch      : branch instruction (conditional PC update)
 //    BranchCond  : 00=BEQ, 01=BNE, 10=BLT, 11=BGT
 //    Jump        : unconditional jump (JMP, JAL)
 //    JR          : jump to register (JR)
 //    HLT         : halt processor
 //    Push        : PUSH operation
 //    Pop         : POP operation
-//    Pilha       : activates COMP (stack bounds check)
-//    SwitchesOn  : route SWITCHES to register write data
-//    PortaON     : send RS to DISPLAY
+//    StackOp     : reserved stack flag (decoded for PUSH/POP, currently unused)
+//    InEnable    : route the SWITCHES value to the register write data (IN)
+//    OutEnable   : send a register value to the DISPLAY (OUT)
 //    imm_sel     : 00=END14, 01=END20, 10=END26
 // =============================================================================
 
@@ -46,9 +46,9 @@ module ucontrole (
     output reg         HLT,
     output reg         Push,
     output reg         Pop,
-    output reg         Pilha,
-    output reg         SwitchesOn,
-    output reg         PortaON,
+    output reg         StackOp,
+    output reg         InEnable,
+    output reg         OutEnable,
     output reg  [1:0]  imm_sel
 );
 
@@ -70,9 +70,9 @@ module ucontrole (
     localparam IMM26 = 2'b10;
 
     // ── Branch condition constants ────────────────────────────────────────────
-    localparam BEQ_COND = 2'b00;  // branch if Zero   = 1
-    localparam BNE_COND = 2'b01;  // branch if Zero   = 0
-    localparam BLT_COND = 2'b10;  // branch if Neg    = 1
+    localparam BEQ_COND = 2'b00;  // branch if Zero = 1
+    localparam BNE_COND = 2'b01;  // branch if Zero = 0
+    localparam BLT_COND = 2'b10;  // branch if Neg  = 1
     localparam BGT_COND = 2'b11;  // branch if !Neg & !Zero
 
     // ── Opcode constants ──────────────────────────────────────────────────────
@@ -117,7 +117,7 @@ module ucontrole (
     // ── Combinational decode ──────────────────────────────────────────────────
     always @(*) begin
 
-        // Default: all signals inactive
+        // Default: every signal inactive.
         RegWrite   = 0;
         RHWrite    = 0;
         RPIWrite   = 0;
@@ -134,314 +134,99 @@ module ucontrole (
         HLT        = 0;
         Push       = 0;
         Pop        = 0;
-        Pilha      = 0;
-        SwitchesOn = 0;
-        PortaON    = 0;
+        StackOp    = 0;
+        InEnable   = 0;
+        OutEnable  = 0;
         imm_sel    = IMM14;
 
         case (Opcode)
 
-            // -----------------------------------------------------------------
-            // ARITHMETIC — REGISTER
-            // -----------------------------------------------------------------
+            // ── Arithmetic — register ─────────────────────────────────────────
+            ADD: begin RegWrite = 1; ULAControl = ULA_ADD; end
+            SUB: begin RegWrite = 1; ULAControl = ULA_SUB; end
+            MUL: begin RegWrite = 1; RHWrite = 1; ULAControl = ULA_MUL; end  // RD=low, R61=high
+            DIV: begin RegWrite = 1; RHWrite = 1; ULAControl = ULA_DIV; end  // RD=quotient, R61=remainder
 
-            ADD: begin
-                RegWrite   = 1;
-                ULAControl = ULA_ADD;
-            end
+            // ── Arithmetic — immediate ────────────────────────────────────────
+            ADDI: begin RegWrite = 1; ULASource = 1; ULAControl = ULA_ADD; end
+            SUBI: begin RegWrite = 1; ULASource = 1; ULAControl = ULA_SUB; end
+            MULI: begin RegWrite = 1; RHWrite = 1; ULASource = 1; ULAControl = ULA_MUL; end
+            DIVI: begin RegWrite = 1; RHWrite = 1; ULASource = 1; ULAControl = ULA_DIV; end
 
-            SUB: begin
-                RegWrite   = 1;
-                ULAControl = ULA_SUB;
-            end
+            // ── Logic — register ──────────────────────────────────────────────
+            AND_OP:  begin RegWrite = 1; ULAControl = ULA_AND;  end
+            OR_OP:   begin RegWrite = 1; ULAControl = ULA_OR;   end
+            NOR_OP:  begin RegWrite = 1; ULAControl = ULA_NOR;  end
+            XNOR_OP: begin RegWrite = 1; ULAControl = ULA_XNOR; end
 
-            MUL: begin
-                RegWrite   = 1;     // RL (R60) receives low word
-                RHWrite    = 1;     // RH (R61) receives high word
-                ULAControl = ULA_MUL;
-            end
+            // ── Logic — immediate ─────────────────────────────────────────────
+            ANDI: begin RegWrite = 1; ULASource = 1; ULAControl = ULA_AND; end
+            ORI:  begin RegWrite = 1; ULASource = 1; ULAControl = ULA_OR;  end
 
-            DIV: begin
-                RegWrite   = 1;     // RL receives quotient
-                RHWrite    = 1;     // RH receives remainder
-                ULAControl = ULA_DIV;
-            end
+            // ── Shift (immediate amount) ──────────────────────────────────────
+            SL: begin RegWrite = 1; ULASource = 1; ULAControl = ULA_SLL; end
+            SR: begin RegWrite = 1; ULASource = 1; ULAControl = ULA_SRL; end
 
-            // -----------------------------------------------------------------
-            // ARITHMETIC — IMMEDIATE
-            // -----------------------------------------------------------------
-
-            ADDI: begin
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_ADD;
-            end
-
-            SUBI: begin
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_SUB;
-            end
-
-            MULI: begin
-                RegWrite   = 1;
-                RHWrite    = 1;
-                ULASource  = 1;
-                ULAControl = ULA_MUL;
-            end
-
-            DIVI: begin
-                RegWrite   = 1;
-                RHWrite    = 1;
-                ULASource  = 1;
-                ULAControl = ULA_DIV;
-            end
-
-            // -----------------------------------------------------------------
-            // LOGIC — REGISTER
-            // -----------------------------------------------------------------
-
-            AND_OP: begin
-                RegWrite   = 1;
-                ULAControl = ULA_AND;
-            end
-
-            OR_OP: begin
-                RegWrite   = 1;
-                ULAControl = ULA_OR;
-            end
-
-            NOR_OP: begin
-                RegWrite   = 1;
-                ULAControl = ULA_NOR;
-            end
-
-            XNOR_OP: begin
-                RegWrite   = 1;
-                ULAControl = ULA_XNOR;
-            end
-
-            // -----------------------------------------------------------------
-            // LOGIC — IMMEDIATE
-            // -----------------------------------------------------------------
-
-            ANDI: begin
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_AND;
-            end
-
-            ORI: begin
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_OR;
-            end
-
-            // -----------------------------------------------------------------
-            // SHIFT (immediate only)
-            // -----------------------------------------------------------------
-
-            SL: begin
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_SLL;
-            end
-
-            SR: begin
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_SRL;
-            end
-
-            // -----------------------------------------------------------------
-            // DATA MOVEMENT
-            // -----------------------------------------------------------------
-
+            // ── Data movement ─────────────────────────────────────────────────
             MOV: begin
-                // RD <= RS: datapath sends RZ as A → 0 + RS = RS
-                RegWrite   = 1;
-                ULAControl = ULA_ADD;
+                // RD <= RS: datapath sends RZ as A -> 0 + RS = RS
+                RegWrite = 1; ULAControl = ULA_ADD;
             end
-
             MOVI: begin
-                // RD <= IM20: A=RZ=0, B=IM20 → 0 + IM20 = IM20
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_ADD;
-                imm_sel    = IMM20;
+                // RD <= IM20: A=RZ=0, B=IM20 -> 0 + IM20 = IM20
+                RegWrite = 1; ULASource = 1; ULAControl = ULA_ADD; imm_sel = IMM20;
             end
 
-            // -----------------------------------------------------------------
-            // LOAD
-            // -----------------------------------------------------------------
-
-            LOADR: begin
-                // RD <= MEM(RS): address = RS (A=RS, B=RZ=0)
-                RegWrite   = 1;
-                ULAControl = ULA_ADD;
-                MemRead    = 1;
-                MemToReg   = 1;
+            // ── Load ──────────────────────────────────────────────────────────
+            LOADR: begin  // RD <= MEM[RS]
+                RegWrite = 1; ULAControl = ULA_ADD; MemRead = 1; MemToReg = 1;
+            end
+            LOADD: begin  // RD <= MEM[RS + END14]
+                RegWrite = 1; ULASource = 1; ULAControl = ULA_ADD; MemRead = 1; MemToReg = 1;
+            end
+            LOADI: begin  // RD <= MEM[END20]
+                RegWrite = 1; ULASource = 1; ULAControl = ULA_ADD; MemRead = 1; MemToReg = 1; imm_sel = IMM20;
             end
 
-            LOADD: begin
-                // RD <= MEM(RS + END14)
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_ADD;
-                MemRead    = 1;
-                MemToReg   = 1;
+            // ── Store ─────────────────────────────────────────────────────────
+            STORER: begin  // MEM[RS] <= RD
+                ULAControl = ULA_ADD; MemWrite = 1;
+            end
+            STORED: begin  // MEM[RS + END14] <= RD
+                ULASource = 1; ULAControl = ULA_ADD; MemWrite = 1;
+            end
+            STOREI: begin  // MEM[END20] <= RD
+                ULASource = 1; ULAControl = ULA_ADD; MemWrite = 1; imm_sel = IMM20;
             end
 
-            LOADI: begin
-                // RD <= MEM(END20): address = END20 (A=RZ=0, B=END20)
-                RegWrite   = 1;
-                ULASource  = 1;
-                ULAControl = ULA_ADD;
-                MemRead    = 1;
-                MemToReg   = 1;
-                imm_sel    = IMM20;
+            // ── Stack ─────────────────────────────────────────────────────────
+            PUSH: begin  // MEM[++RPI] <= RD
+                RPIWrite = 1; ULAControl = ULA_ADD; MemWrite = 1; Push = 1; StackOp = 1;
+            end
+            POP: begin   // RD <= MEM[RPI--]
+                RegWrite = 1; RPIWrite = 1; ULAControl = ULA_SUB; MemRead = 1; MemToReg = 1; Pop = 1; StackOp = 1;
             end
 
-            // -----------------------------------------------------------------
-            // STORE
-            // -----------------------------------------------------------------
+            // ── Branch (compare RS vs RD via SUB) ─────────────────────────────
+            BEQ: begin ULAControl = ULA_SUB; Branch = 1; BranchCond = BEQ_COND; end
+            BNE: begin ULAControl = ULA_SUB; Branch = 1; BranchCond = BNE_COND; end
+            BLT: begin ULAControl = ULA_SUB; Branch = 1; BranchCond = BLT_COND; end
+            BGT: begin ULAControl = ULA_SUB; Branch = 1; BranchCond = BGT_COND; end
 
-            STORER: begin
-                // MEM(RS) <= RD: address = RS (A=RS, B=RZ=0)
-                ULAControl = ULA_ADD;
-                MemWrite   = 1;
-            end
+            // ── Jump ──────────────────────────────────────────────────────────
+            JMP: begin Jump = 1; imm_sel = IMM26; end
+            JAL: begin RALWrite = 1; Jump = 1; imm_sel = IMM26; end  // RAL <= PC+1 (in the register bank)
+            JR_OP: begin JR = 1; end
 
-            STORED: begin
-                // MEM(RS + END14) <= RD
-                ULASource  = 1;
-                ULAControl = ULA_ADD;
-                MemWrite   = 1;
-            end
+            // ── I/O ───────────────────────────────────────────────────────────
+            IN_OP:  begin RegWrite = 1; InEnable  = 1; end  // RD <= SWITCHES
+            OUT_OP: begin OutEnable = 1;               end  // DISPLAY <= RS
 
-            STOREI: begin
-                // MEM(END20) <= RD: address = END20 (A=RZ=0, B=END20)
-                ULASource  = 1;
-                ULAControl = ULA_ADD;
-                MemWrite   = 1;
-                imm_sel    = IMM20;
-            end
+            // ── System ────────────────────────────────────────────────────────
+            NOP:    begin /* no operation */ end
+            HLT_OP: begin HLT = 1;           end
 
-            // -----------------------------------------------------------------
-            // STACK
-            // -----------------------------------------------------------------
-
-            PUSH: begin
-                // STACK(+RPI) <= RD
-                // ALU computes RPI+1 → written to memory, RPI updated
-                RPIWrite   = 1;
-                ULAControl = ULA_ADD;
-                MemWrite   = 1;
-                Push       = 1;
-                Pilha      = 1;
-            end
-
-            POP: begin
-                // RD <= STACK(RPI-)
-                // Read MEM(RPI), then RPI-1
-                RegWrite   = 1;
-                RPIWrite   = 1;
-                ULAControl = ULA_SUB;
-                MemRead    = 1;
-                MemToReg   = 1;
-                Pop        = 1;
-                Pilha      = 1;
-            end
-
-            // -----------------------------------------------------------------
-            // BRANCH
-            // -----------------------------------------------------------------
-
-            BEQ: begin
-                // if(RS == RT) PC <= PC+1+END14
-                ULAControl = ULA_SUB;  // SUB to compare → checks Zero flag
-                Branch     = 1;
-                BranchCond = BEQ_COND;
-            end
-
-            BNE: begin
-                // if(RS != RT) PC <= PC+1+END14
-                ULAControl = ULA_SUB;
-                Branch     = 1;
-                BranchCond = BNE_COND;
-            end
-
-            BLT: begin
-                // if(RS < RT) PC <= PC+1+END14
-                ULAControl = ULA_SUB;  // checks Negativo flag
-                Branch     = 1;
-                BranchCond = BLT_COND;
-            end
-
-            BGT: begin
-                // if(RS > RT) PC <= PC+1+END14
-                ULAControl = ULA_SUB;  // checks !Negativo & !Zero
-                Branch     = 1;
-                BranchCond = BGT_COND;
-            end
-
-            // -----------------------------------------------------------------
-            // JUMP
-            // -----------------------------------------------------------------
-
-            JMP: begin
-                // PC <= END26
-                Jump    = 1;
-                imm_sel = IMM26;
-            end
-
-            JAL: begin
-                // RAL <= PC; PC <= END26
-                RALWrite = 1;
-                Jump     = 1;
-                imm_sel  = IMM26;
-            end
-
-            JR_OP: begin
-                // PC <= RD
-                JR = 1;
-            end
-
-            // -----------------------------------------------------------------
-            // I/O
-            // -----------------------------------------------------------------
-
-            IN_OP: begin
-                // RD <= SWITCHES
-                RegWrite   = 1;
-                SwitchesOn = 1;
-            end
-
-            OUT_OP: begin
-                // DISPLAY <= RS
-                PortaON = 1;
-            end
-
-            // -----------------------------------------------------------------
-            // SYSTEM
-            // -----------------------------------------------------------------
-
-            NOP: begin
-                // No operation — all signals remain at default (0)
-            end
-
-            HLT_OP: begin
-                // Halt processor
-                HLT = 1;
-            end
-
-            // -----------------------------------------------------------------
-            // UNDEFINED OPCODE — safe default
-            // -----------------------------------------------------------------
-            default: begin
-                // All signals stay at default (0)
-                // Processor effectively executes a NOP
-            end
+            default: begin /* undefined opcode: behaves as NOP */ end
 
         endcase
     end

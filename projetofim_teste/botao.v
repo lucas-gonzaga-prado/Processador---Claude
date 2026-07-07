@@ -1,37 +1,45 @@
 `timescale 1ns / 1ps
+
 // =============================================================================
-//  Módulo BOTAO — Versão Corrigida (2 Clocks de Aceite + Saída Ativa em Baixo)
+//  botao — Push-button debounce + one-shot strobe
+//
+//  Filters the mechanical bounce of a physical push-button and produces a clean
+//  single-cycle strobe. The output rests HIGH and drops to 0 for exactly one
+//  clock cycle when a stable press is detected.
+//
+//  Sampled by the divided clock (clk_slow), so the response time scales with the
+//  clock frequency (e.g. at 0.5 Hz it takes ~2 samples = a few seconds to accept).
 // =============================================================================
+
 module botao (
-    input  wire clk,       // clock do processador (já dividido)
-    input  wire btn_n,     // botão físico — ativo em nível baixo (0 = pressionado)
-    output reg  BOTTON     // pulso de 1 ciclo (ATUALIZADO: 0 = pulso de disparo)
+    input  wire clk,     // sampling clock (the divided clk_slow)
+    input  wire btn_n,   // physical button, active-low (0 = pressed)
+    output reg  pulse     // one-cycle strobe, idle-high (drops to 0 on a clean press)
 );
 
-    // Shift register reduzido para 2 bits (exige 2 amostras consecutivas)
-    reg [1:0] shift;
-    wire btn_ativo = ~btn_n;  // converte para ativo alto internamente
+    // 2-sample shift register: a press is accepted only after 2 consecutive samples.
+    reg  [1:0] shift;
+    wire btn_active = ~btn_n;   // convert to active-high internally
 
-    // Garante que o sinal comece em 1 (já que agora o repouso é alto)
+    // Start idle-high, since the output rests at 1.
     initial begin
-        shift  = 2'b00;
-        BOTTON = 1'b1;
+        shift = 2'b00;
+        pulse = 1'b1;
     end
 
     always @(posedge clk) begin
-        shift <= {shift[0], btn_ativo};
+        shift <= {shift[0], btn_active};
     end
 
-    // 1 apenas quando as 2 últimas amostras forem válidas (pressionado)
-    wire btn_estavel = &shift;  
+    // High only when the last 2 samples are both "pressed" (debounced).
+    wire btn_stable = &shift;
 
+    // Rising-edge detector: emit one strobe (pulse -> 0 for 1 cycle) at the moment
+    // the button becomes stably pressed. The '~' keeps the output idle-high.
     reg btn_prev;
     always @(posedge clk) begin
-        btn_prev <= btn_estavel;
-        
-        // INVERTIDO: O operador ~ garante que o sinal seja 1 por padrão.
-        // No momento do clique, ele cai para 0 por 1 ciclo e faz o processador "pular".
-        BOTTON   <= ~(btn_estavel & ~btn_prev);
+        btn_prev <= btn_stable;
+        pulse    <= ~(btn_stable & ~btn_prev);
     end
 
-endmodule 
+endmodule

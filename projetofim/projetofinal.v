@@ -1,31 +1,28 @@
 `timescale 1ns / 1ps
 
 // =============================================================================
-//  Top.v — Top-level IO for DE2-115 (Cyclone IV EP4CE115F29C7)
+//  projetofinal — Top-level I/O for the DE2-115 (Cyclone IV EP4CE115F29C7)
 //
-//  Pin mapping:
-//    CLOCK_50     → processor clock (50 MHz)
-//    KEY[0]       → reset (active low) — volta ao estado inicial (PC=0, display 0000)
-//    KEY[1]       → start (1 aperto inicia; depois roda sozinho no clk_lento)
+//  Board mapping:
+//    CLOCK_50    -> 50 MHz reference clock (divided down to clk_slow)
+//    KEY[0]      -> reset (active-low) — returns to the idle state (PC=0, display 0)
+//    KEY[1]      -> start (active-low) — one press arms; then it runs on its own
+//    SW[17:0]    -> Switches[17:0] input (read by the IN instruction)
+//    LEDR[17:0]  -> Display[17:0] in binary (OUT value, low 18 bits)
+//    LEDG[0]     -> running (on while executing, off when idle or halted)
+//    LEDG[1]     -> MemWrite active     LEDG[2] -> MemRead active
+//    LEDG[3]     -> branch taken
+//    HEX0-HEX7   -> Display in DECIMAL (via bin2bcd): HEX0=units, HEX1=tens, ...
+//                   (values >= 10^8 show only the low 8 decimal digits)
 //
-//  Estado inicial: ao ligar/resetar, o processador fica congelado (PC=0) e o
-//  display mostra "0000". Basta 1 aperto de KEY[1] para iniciar; a partir dai o
-//  programa roda automaticamente (~10 Hz) ate o HLT. O display TRAVA no ultimo
-//  valor mostrado (nao apaga no HLT). KEY[0] reinicia tudo.
-//    SW[17:0]     → Switches[17:0] input (IN instruction)
-//    LEDR[17:0]   → Display[17:0]  output (OUT instruction)
-//    LEDG[8:0]    → status LEDs
-//                   LEDG[0] = processor running (HLT indicator)
-//                   LEDG[1] = MemWrite active
-//                   LEDG[2] = MemRead active
-//                   LEDG[3] = Branch taken
-//    HEX0-HEX7   → Display em DECIMAL (via bin2bcd): HEX0=unidades, HEX1=dezenas,
-//                   HEX2=centenas, ... (valores >= 10^8 mostram os 8 dígitos baixos)
+//  Behaviour: on power-up/reset the core is frozen (PC=0, display 0). One press
+//  of KEY[1] arms it (started=1); from then on it runs automatically on clk_slow
+//  until HLT. The display holds the last shown value (does not blank on HLT).
 // =============================================================================
 
 module projetofinal (
     input  wire        CLOCK_50,
-    input  wire [3:0]  KEY,        // active low
+    input  wire [3:0]  KEY,        // active-low
     input  wire [17:0] SW,
 
     output wire [17:0] LEDR,
@@ -40,95 +37,87 @@ module projetofinal (
     output wire [6:0]  HEX7
 );
 
-    // ── Internal wires ─────────────────────────────────────────────────────────
+    // ── Internal wires ──────────────────────────────────────────────────────────
     wire        rst;
     wire [31:0] Switches;
     wire [31:0] Display;
-    
-    wire        clk_lento;
-    wire        clock_passo; // Sinal do botão para o processador
 
-    reg         started;     // 0 = travado (display 0000), 1 = programa liberado
+    wire        clk_slow;      // divided processor clock
+    wire        start_pulse;   // one-shot strobe from the start button (KEY[1])
 
-    // ── Control signals exposed from processor ─────────────────────────────────
+    reg         started;       // 0 = idle (display 0), 1 = running
+
+    // Status taps exposed by the core (drive the green LEDs).
     wire        HLT_sig;
     wire        MemWrite_sig;
     wire        MemRead_sig;
     wire        BranchTaken_sig;
 
-    // ── Reset: KEY[0] active low → rst active high ─────────────────────────────
+    // ── Reset: KEY[0] active-low -> rst active-high ─────────────────────────────
     assign rst = ~KEY[0];
 
-    // ── Switches: SW[17:0] → Switches[17:0], upper bits = 0 ───────────────────
+    // ── Switches: SW[17:0] -> Switches[17:0], upper bits = 0 ────────────────────
     assign Switches = {14'b0, SW[17:0]};
 
-    // ── Geração de Clock Lento e Debounce do Botão ─────────────────────────────
-    
-    // Instancia o divisor de frequência: 50MHz / (2*DIVISOR) = 1 MHz
+    // ── Slow clock + button debounce ────────────────────────────────────────────
+    // Divider: clk_slow = 50MHz / (2*DIVISOR).
     DivisorFreq #(
-        .DIVISOR(25)       // 1 MHz: Fibonacci roda quase instantaneo (mostra so o resultado)
+        .DIVISOR(25)       // 1 MHz: Fibonacci runs almost instantly (shows only the result)
     ) div_clock (
         .clk_in  (CLOCK_50),
-        .clk_out (clk_lento)
+        .clk_out (clk_slow)
     );
 
-    // Instancia o botão para o modo Step (KEY[1])
-    botao btn_step (
-        .clk     (clk_lento),
-        .btn_n   (KEY[1]),
-        .BOTTON  (clock_passo)
+    // Start button (KEY[1]) debounced into a clean one-shot strobe.
+    botao btn_start (
+        .clk    (clk_slow),
+        .btn_n  (KEY[1]),
+        .pulse  (start_pulse)
     );
 
-    // ── Start gate: 1 aperto inicia; depois roda SOZINHO ───────────────────────
-    // 'started' sobe no 1º aperto do KEY[1] (borda de subida do clock_passo).
-    // Depois disso o processador roda automaticamente no clock livre clk_lento
-    // (~10 Hz) — nao precisa apertar a cada instrucao.
-    // KEY[0] (reset) volta 'started' a 0 (tela inicial 0000) para rodar de novo.
+    // ── Start gate: one press arms, then it runs on its own ─────────────────────
+    // 'started' rises on the first KEY[1] press (rising edge of start_pulse) and
+    // feeds the core's clock-enable. KEY[0] (reset) clears it back to idle.
     initial started = 1'b0;
-    always @(posedge clock_passo or posedge rst) begin
-        if (rst) started <= 1'b0;   // KEY[0] reinicia (tela inicial 0000)
-        else     started <= 1'b1;   // 1º aperto libera a execucao automatica
+    always @(posedge start_pulse or posedge rst) begin
+        if (rst) started <= 1'b0;   // reset -> idle
+        else     started <= 1'b1;   // first press -> run automatically
     end
 
-    // ── Processor instantiation ────────────────────────────────────────────────
-    // Clock LIVRE: o processador roda no clk_lento (clock limpo do divisor, ja em
-    // rede global). 'started' entra como CLOCK-ENABLE (en): enquanto 0 o PC e as
-    // escritas ficam congelados (PC=0). O 1º aperto do KEY[1] arma (started=1) e a
-    // partir dai o clk_lento avanca uma instrucao por borda automaticamente ate o HLT.
+    // ── Processor core ──────────────────────────────────────────────────────────
+    // Clocked by the free-running clk_slow; 'started' drives the clock-enable so
+    // the core stays frozen (PC=0) until armed.
     Processador proc (
-        .clk             (clk_lento),   // clock livre ~10 Hz (roda sozinho)
-        .en              (started),     // 1º aperto arma; depois roda automatico
+        .clk             (clk_slow),      // port clk        <- clk_slow
+        .en              (started),       // port en         <- started (arm)
         .rst             (rst),
         .Switches        (Switches),
         .Display         (Display),
 
-        // Status signals → LEDs verdes
         .dbg_MemWrite    (MemWrite_sig),
         .dbg_MemRead     (MemRead_sig),
         .dbg_HLT         (HLT_sig),
         .dbg_BranchTaken (BranchTaken_sig)
     );
 
-    // ── LEDs ───────────────────────────────────────────────────────────────────
-    // Red LEDs: show lower 18 bits of Display
-    assign LEDR[17:0] = Display[17:0];
+    // ── LEDs ────────────────────────────────────────────────────────────────────
+    assign LEDR[17:0] = Display[17:0];        // OUT value in binary
 
-    // Green LEDs: processor status
-    assign LEDG[0] = started & ~HLT_sig; // ON = rodando, OFF = aguardando ou halt
-    assign LEDG[1] = MemWrite_sig;     // ON = writing to memory
-    assign LEDG[2] = MemRead_sig;      // ON = reading from memory
-    assign LEDG[3] = BranchTaken_sig;  // ON = branch taken
-    assign LEDG[8:4] = 5'b0;          // unused
+    assign LEDG[0]   = started & ~HLT_sig;    // running
+    assign LEDG[1]   = MemWrite_sig;          // writing to memory
+    assign LEDG[2]   = MemRead_sig;           // reading from memory
+    assign LEDG[3]   = BranchTaken_sig;       // branch taken
+    assign LEDG[8:4] = 5'b0;                  // unused
 
-    // ── Seven-segment displays: mostra Display em DECIMAL (8 dígitos) ───────────
-    // Converte o valor binário para BCD (double dabble) e manda cada dígito
-    // decimal (0..9) para um display. Valores >= 10^8 mostram os 8 dígitos baixos.
+    // ── Seven-segment displays: Display shown in DECIMAL ────────────────────────
+    // bin2bcd converts the binary value to 8 BCD digits (double dabble); each
+    // digit drives one 7-segment display. Values >= 10^8 show the low 8 digits.
     wire [31:0] bcd;
     bin2bcd conv (.bin(Display), .bcd(bcd));
 
-    hex_decoder h0 (.val(bcd[3:0]),   .seg(HEX0));   // unidades
-    hex_decoder h1 (.val(bcd[7:4]),   .seg(HEX1));   // dezenas
-    hex_decoder h2 (.val(bcd[11:8]),  .seg(HEX2));   // centenas
+    hex_decoder h0 (.val(bcd[3:0]),   .seg(HEX0));   // units
+    hex_decoder h1 (.val(bcd[7:4]),   .seg(HEX1));   // tens
+    hex_decoder h2 (.val(bcd[11:8]),  .seg(HEX2));   // hundreds
     hex_decoder h3 (.val(bcd[15:12]), .seg(HEX3));
     hex_decoder h4 (.val(bcd[19:16]), .seg(HEX4));
     hex_decoder h5 (.val(bcd[23:20]), .seg(HEX5));
@@ -139,27 +128,26 @@ endmodule
 
 
 // =============================================================================
-//  bin2bcd — conversor binário -> BCD (algoritmo "double dabble", combinacional)
+//  bin2bcd — binary -> BCD converter ("double dabble", combinational)
 //
-//  Entrada: 32 bits binário.  Saída: 8 dígitos BCD (4 bits cada = 0..9).
-//  Cada dígito vai para um display de 7 segmentos, mostrando o número em DECIMAL.
-//  Observação: só há 8 displays, então valores >= 100.000.000 mostram apenas os
-//  8 dígitos decimais mais baixos (o resto do range de 32 bits não cabe).
+//  Input: 32-bit binary. Output: 8 BCD digits (4 bits each = 0..9), one per
+//  7-segment display, so the number reads in DECIMAL. Only 8 displays exist, so
+//  values >= 100,000,000 show just the low 8 decimal digits.
 // =============================================================================
 
 module bin2bcd (
     input  wire [31:0] bin,
-    output reg  [31:0] bcd    // 8 dígitos: bcd[3:0]=unidades, [7:4]=dezenas, ...
+    output reg  [31:0] bcd    // bcd[3:0]=units, [7:4]=tens, ...
 );
     integer i, j;
     always @(*) begin
         bcd = 32'd0;
         for (i = 31; i >= 0; i = i - 1) begin
-            // antes de deslocar, soma 3 a cada dígito BCD que for >= 5
+            // Before shifting, add 3 to any BCD digit that is >= 5.
             for (j = 0; j < 8; j = j + 1)
                 if (bcd[j*4 +: 4] >= 5)
                     bcd[j*4 +: 4] = bcd[j*4 +: 4] + 4'd3;
-            // desloca 1 bit para a esquerda, trazendo o próximo bit do binário
+            // Shift left by one, bringing in the next binary bit.
             bcd = {bcd[30:0], bin[i]};
         end
     end
@@ -167,15 +155,8 @@ endmodule
 
 
 // =============================================================================
-//  hex_decoder — 4-bit value to 7-segment display (active low)
-//
-//  Segment layout:
-//      _
-//     |_|
-//     |_|
-//
-//  Bit order: seg[6:0] = gfedcba
-//  Active LOW: 0 = segment ON, 1 = segment OFF
+//  hex_decoder — 4-bit value to 7-segment display (active-low)
+//    Bit order: seg[6:0] = gfedcba   (0 = segment ON, 1 = segment OFF)
 // =============================================================================
 
 module hex_decoder (
